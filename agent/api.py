@@ -18,20 +18,24 @@ from agent.modules.career import suggest_path
 from agent.memory.memory import init_db, get_recent_fiae_logs
 
 app = FastAPI(title="Barakzai Personal Agent API", version="0.1.0")
-
-# Allow frontend (e.g. Vite dev server on port 3000)
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "https://barakzai.cloud",
+        "https://www.barakzai.cloud",
+        "https://dailyflow-75h.pages.dev",   # اختیاری ولی مفید
+        "http://localhost:8080",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
 
 
 @app.on_event("startup")
@@ -48,11 +52,28 @@ class FiaeRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     message: str
-    language: Literal["de", "fa"] = "de"
+    language: Literal["de", "fa", "en"] = "de"
+    mode: str | None = None
 
 
-class AnalyzeResponse(BaseModel):
-    answer: str
+class AnalyzeMeta(BaseModel):
+    type: Literal["ok", "error", "quota"]
+    lang: Literal["de", "fa", "en"]
+    mode: Literal["fiae_algorithms", "general_it", "wiso", "planner", "unknown"]
+    model: str
+    cached: bool
+    retry_after_seconds: int | None
+
+
+class AnalyzeResult(BaseModel):
+    summary: str
+    steps: List[str]
+    example: str | None
+    pseudocode: str | None
+    visual: str | None
+    meta: AnalyzeMeta
+
+
 
 
 class PlannerTaskInput(BaseModel):
@@ -159,44 +180,65 @@ def _format_analysis_answer(result: object, lang: str, topic: str) -> str:
     if isinstance(steps, list):
         cleaned_steps = [str(step).strip() for step in steps if str(step).strip()]
         if cleaned_steps:
-            header = "\u06af\u0627\u0645\u200c\u0647\u0627:" if lang == "fa" else "Schritte:"
+            if lang == "fa":
+                header = "\u06af\u0627\u0645\u200c\u0647\u0627:"
+            elif lang == "en":
+                header = "Steps:"
+            else:
+                header = "Schritte:"
             parts.append(header)
             parts.extend([f"{idx}. {step}" for idx, step in enumerate(cleaned_steps, start=1)])
 
     example = result.get("example")
     if isinstance(example, str) and example.strip():
-        header = "\u0645\u062b\u0627\u0644:" if lang == "fa" else "Beispiel:"
+        if lang == "fa":
+            header = "\u0645\u062b\u0627\u0644:"
+        elif lang == "en":
+            header = "Example:"
+        else:
+            header = "Beispiel:"
         parts.append(header)
         parts.append(example.strip())
 
     pseudocode = result.get("pseudocode")
     if isinstance(pseudocode, str) and pseudocode.strip():
-        header = "\u0634\u0628\u0647\u200c\u06a9\u062f:" if lang == "fa" else "Pseudocode:"
+        if lang == "fa":
+            header = "\u0634\u0628\u0647\u200c\u06a9\u062f:"
+        elif lang == "en":
+            header = "Pseudocode:"
+        else:
+            header = "Pseudocode:"
         parts.append(header)
         parts.append(pseudocode.strip())
 
     visual = result.get("visual")
     if isinstance(visual, str) and visual.strip():
-        header = "\u0646\u0645\u0627\u06cc\u0634:" if lang == "fa" else "Visual:"
+        if lang == "fa":
+            header = "\u0646\u0645\u0627\u06cc\u0634:"
+        elif lang == "en":
+            header = "Visual:"
+        else:
+            header = "Visual:"
         parts.append(header)
         parts.append(visual.strip())
 
-    pseudocode_block = _get_pseudocode_block(topic, lang)
-    if pseudocode_block:
-        parts.append("")
-        parts.append(pseudocode_block)
-
-    pitfalls = _get_exam_pitfalls(topic, lang)
-    if pitfalls:
-        parts.append("")
-        parts.append(pitfalls)
-
-    if lang == "fa":
-        keywords = _get_german_keywords(topic)
-        if keywords:
+    if lang in ("de", "fa"):
+        pseudocode_block = _get_pseudocode_block(topic, lang)
+        if pseudocode_block:
             parts.append("")
-            parts.append("---")
-            parts.append(keywords)
+            parts.append(pseudocode_block)
+
+        pitfalls = _get_exam_pitfalls(topic, lang)
+        if pitfalls:
+            parts.append("")
+            parts.append(pitfalls)
+
+        if lang == "fa":
+            keywords = _get_german_keywords(topic)
+            if keywords:
+                parts.append("")
+                parts.append("---")
+                parts.append(keywords)
 
     return "\n".join(parts).strip()
 
@@ -208,12 +250,10 @@ def root():
     return {"status": "ok", "message": "API is running"}
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze", response_model=AnalyzeResult)
 def analyze(req: AnalyzeRequest):
-    lang = req.language
-    result = analyze_problem(req.message, language=lang)
-    answer = _format_analysis_answer(result, lang, req.message)
-    return AnalyzeResponse(answer=answer)
+    result = analyze_problem(req.message, language=req.language, mode=req.mode)
+    return AnalyzeResult(**result)
 
 
 @app.exception_handler(RequestValidationError)
@@ -230,7 +270,7 @@ async def validation_exception_handler(request, exc):
 
 @app.get("/languages")
 def languages():
-    return {"languages": ["de", "fa"], "default": "de"}
+    return {"languages": ["de", "fa", "en"], "default": "de"}
 
 
 EXAM_KEYWORDS_DE = [

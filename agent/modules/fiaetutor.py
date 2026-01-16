@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import re
@@ -19,23 +20,52 @@ client = OpenAI(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 )
 
+MODEL_NAME = "gemini-2.5-flash"
+_CACHE: dict[tuple[str, str, str], dict[str, object]] = {}
+
 
 def _normalize_lang(lang: str) -> str:
-    return "fa" if (lang or "").strip().lower() == "fa" else "de"
+    normalized = (lang or "").strip().lower()
+    if normalized == "fa":
+        return "fa"
+    if normalized == "en":
+        return "en"
+    return "de"
 
 
-def _empty_result(summary: str) -> dict[str, object]:
+def _build_meta(
+    *,
+    language: str,
+    mode: str | None,
+    cached: bool,
+    meta_type: str = "ok",
+    retry_after_seconds: int | None = None,
+) -> dict[str, object]:
+    return {
+        "type": meta_type,
+        "lang": language,
+        "mode": mode or "unknown",
+        "model": MODEL_NAME,
+        "cached": cached,
+        "retry_after_seconds": retry_after_seconds,
+    }
+
+
+def _empty_result(summary: str, meta: dict[str, object]) -> dict[str, object]:
     return {
         "summary": summary,
         "steps": [],
         "example": None,
         "pseudocode": None,
         "visual": None,
+        "meta": meta,
     }
 
 
-def _coerce_result(data: Any, fallback_summary: str) -> dict[str, object]:
-    result = _empty_result(fallback_summary)
+def _coerce_result(
+    data: Any, fallback_summary: str, meta: dict[str, object]
+) -> dict[str, object]:
+    result = _empty_result(fallback_summary, meta)
     if not isinstance(data, dict):
         return result
 
@@ -63,39 +93,155 @@ def _coerce_result(data: Any, fallback_summary: str) -> dict[str, object]:
     return result
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "\\" and not escape:
+            escape = True
+            continue
+        if char == '"' and not escape:
+            in_string = not in_string
+        escape = False
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
 def _parse_json(content: str) -> Any | None:
     if not content:
         return None
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", content, re.IGNORECASE)
+    if fence_match:
+        content = fence_match.group(1).strip()
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", content, re.DOTALL)
+        candidate = _extract_first_json_object(content)
+        if not candidate:
+            return None
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+
+
+def _extract_retry_after_seconds(text: str) -> int | None:
+    if not text:
+        return None
+    patterns = [
+        r"retry[- ]after[:\s]+(\d+)",
+        r"Retry-After:\s*(\d+)",
+        r"in\s+(\d+)\s*seconds",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
+                return int(match.group(1))
+            except ValueError:
                 return None
-        return None
+    return None
 
 
-def analyze_problem(problem_text: str, lang: str = "de") -> dict[str, object]:
-    text = (problem_text or "").strip()
-    normalized_lang = _normalize_lang(lang)
+def _looks_like_quota_error(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "resource_exhausted" in lowered
+        or "quota" in lowered
+        or "429" in lowered
+    )
 
-    if not text:
-        empty_summary = "متنی برای تحلیل دریافت نشد." if normalized_lang == "fa" else "Kein Problemtext erhalten."
-        return _empty_result(empty_summary)
 
-    if normalized_lang == "fa":
-        lang_instruction = "Antworte in Persisch (Farsi)."
-        parse_fail_summary = "پاسخ قابل ساختاردهی نبود."
-        error_summary = "خطا در ماژول FIAE (Gemini):"
-    else:
-        lang_instruction = "Antworte auf Deutsch."
-        parse_fail_summary = "Antwort konnte nicht strukturiert werden."
-        error_summary = "Fehler beim FIAE-Modul (Gemini):"
+def _fallback_summary(lang: str) -> str:
+    if lang == "fa":
+        return "متاسفانه پاسخ معتبر تولید نشد."
+    if lang == "en":
+        return "A valid response could not be produced."
+    return "Es konnte keine gueltige Antwort erzeugt werden."
 
-    system_prompt = f"""
+
+def _empty_summary(lang: str) -> str:
+    if lang == "fa":
+        return "متن مسئله دریافت نشد."
+    if lang == "en":
+        return "No problem text received."
+    return "Kein Problemtext erhalten."
+
+
+def _language_mismatch_summary(lang: str) -> str:
+    if lang == "fa":
+        return "عدم تطابق زبان پاسخ. لطفا دوباره تلاش کنید."
+    if lang == "en":
+        return "Language mismatch: the response was not in English."
+    return "Sprachfehler: Die Antwort war nicht auf Deutsch."
+
+
+def _quota_summary(lang: str) -> str:
+    if lang == "fa":
+        return "سهمیه تمام شده است. لطفا بعدا دوباره تلاش کنید."
+    if lang == "en":
+        return "Quota exceeded. Please try again later."
+    return "Kontingent aufgebraucht. Bitte spaeter erneut versuchen."
+
+
+def _error_summary(lang: str) -> str:
+    if lang == "fa":
+        return "خطایی رخ داد. لطفا دوباره تلاش کنید."
+    if lang == "en":
+        return "An error occurred. Please try again."
+    return "Ein Fehler ist aufgetreten. Bitte erneut versuchen."
+
+
+def _collect_text(data: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key in ("summary", "example", "pseudocode", "visual"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        parts.extend([str(step).strip() for step in steps if str(step).strip()])
+    return " ".join(parts)
+
+
+def _contains_persian(text: str) -> bool:
+    return re.search(r"[\u0600-\u06FF]", text or "") is not None
+
+
+def _contains_latin(text: str) -> bool:
+    return re.search(r"[A-Za-z]", text or "") is not None
+
+
+def _language_ok(data: dict[str, object], lang: str) -> bool:
+    text = _collect_text(data)
+    if lang == "fa":
+        return _contains_persian(text) and not _contains_latin(text)
+    if lang in ("de", "en"):
+        return not _contains_persian(text)
+    return True
+
+
+def _build_system_prompt(lang: str, strong: bool = False) -> str:
+    extra_rule = ""
+    if strong:
+        extra_rule = (
+            f"- The response must be in {lang} ONLY.\n"
+            "- Do NOT include any other language.\n"
+            "- Output JSON ONLY with the exact schema.\n"
+        )
+    return f"""
 You are a strict but helpful FIAE (Fachinformatiker Anwendungsentwicklung) exam coach.
 Focus ONLY on:
 - Algorithm thinking
@@ -103,9 +249,12 @@ Focus ONLY on:
 - Step-by-step reasoning
 
 Rules:
-- No greetings (no "Guten Tag") and no filler sentences.
+- No greetings and no filler sentences.
 - Be concise; avoid long intros.
 - Do NOT just give the final answer.
+- Output JSON ONLY (no markdown, no code fences, no extra text).
+- All strings must be in {lang}.
+{extra_rule}
 
 Output format:
 Return ONLY valid JSON with this exact schema:
@@ -114,7 +263,15 @@ Return ONLY valid JSON with this exact schema:
   "steps": ["string", ...],
   "example": "string or null",
   "pseudocode": "string or null",
-  "visual": "string or null"
+  "visual": "string or null",
+  "meta": {{
+    "type": "ok",
+    "lang": "{lang}",
+    "mode": "fiae_algorithms|general_it|wiso|planner|unknown",
+    "model": "{MODEL_NAME}",
+    "cached": false,
+    "retry_after_seconds": null
+  }}
 }}
 
 Guidelines:
@@ -123,24 +280,117 @@ Guidelines:
 - example: short example if useful, otherwise null.
 - pseudocode: short pseudocode if useful, otherwise null.
 - visual: ASCII diagram or short description if useful, otherwise null.
-
-{lang_instruction}
 """
 
+
+def _call_model(messages: list[dict[str, str]]) -> str:
+    completion = client.chat.completions.create(
+        model=MODEL_NAME,
+        temperature=0.2,
+        messages=messages,
+    )
+    return completion.choices[0].message.content or ""
+
+
+def analyze_problem(
+    problem_text: str,
+    lang: str | None = None,
+    *,
+    language: str | None = None,
+    mode: str | None = None,
+) -> dict[str, object]:
+    text = (problem_text or "").strip()
+    normalized_lang = _normalize_lang(language or lang or "de")
+    normalized_mode = mode or "unknown"
+
+    if not text:
+        meta = _build_meta(
+            language=normalized_lang,
+            mode=normalized_mode,
+            cached=False,
+        )
+        return _empty_result(_empty_summary(normalized_lang), meta)
+
+    cache_key = (text, normalized_lang, normalized_mode)
+    if cache_key in _CACHE:
+        cached_result = copy.deepcopy(_CACHE[cache_key])
+        cached_meta = _build_meta(
+            language=normalized_lang,
+            mode=normalized_mode,
+            cached=True,
+        )
+        cached_result["meta"] = cached_meta
+        return cached_result
+
+    system_prompt = _build_system_prompt(normalized_lang)
+
     try:
-        completion = client.chat.completions.create(
-            model="gemini-2.5-flash",
-            temperature=0.3,
-            messages=[
+        content = _call_model(
+            [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
-            ],
+            ]
+        )
+        parsed = _parse_json(content)
+        base_meta = _build_meta(
+            language=normalized_lang,
+            mode=normalized_mode,
+            cached=False,
         )
 
-        content = completion.choices[0].message.content or ""
-        parsed = _parse_json(content)
-        if parsed is None:
-            return _empty_result(parse_fail_summary)
-        return _coerce_result(parsed, parse_fail_summary)
+        if parsed is None or not isinstance(parsed, dict):
+            summary = content.strip() or _fallback_summary(normalized_lang)
+            return _empty_result(summary, base_meta)
+
+        result = _coerce_result(parsed, _fallback_summary(normalized_lang), base_meta)
+
+        if not _language_ok(result, normalized_lang):
+            strong_prompt = _build_system_prompt(normalized_lang, strong=True)
+            retry_content = _call_model(
+                [
+                    {"role": "system", "content": strong_prompt},
+                    {"role": "user", "content": text},
+                ]
+            )
+            retry_parsed = _parse_json(retry_content)
+            if isinstance(retry_parsed, dict):
+                retry_result = _coerce_result(
+                    retry_parsed,
+                    _fallback_summary(normalized_lang),
+                    base_meta,
+                )
+                if _language_ok(retry_result, normalized_lang):
+                    _CACHE[cache_key] = copy.deepcopy(retry_result)
+                    return retry_result
+
+            error_meta = _build_meta(
+                language=normalized_lang,
+                mode=normalized_mode,
+                cached=False,
+                meta_type="error",
+            )
+            return _empty_result(_language_mismatch_summary(normalized_lang), error_meta)
+
+        _CACHE[cache_key] = copy.deepcopy(result)
+        return result
     except Exception as e:
-        return _empty_result(f"{error_summary} {e}")
+        message = str(e)
+        retry_after_seconds = _extract_retry_after_seconds(message)
+        if _looks_like_quota_error(message):
+            meta = _build_meta(
+                language=normalized_lang,
+                mode=normalized_mode,
+                cached=False,
+                meta_type="quota",
+                retry_after_seconds=retry_after_seconds,
+            )
+            return _empty_result(_quota_summary(normalized_lang), meta)
+
+        meta = _build_meta(
+            language=normalized_lang,
+            mode=normalized_mode,
+            cached=False,
+            meta_type="error",
+            retry_after_seconds=retry_after_seconds,
+        )
+        return _empty_result(_error_summary(normalized_lang), meta)

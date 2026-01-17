@@ -2,19 +2,40 @@ name: Deploy AI Agent
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+  workflow_dispatch: {}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Write SSH key
+      - name: Sanity print (no secrets)
+        run: |
+          echo "HOST=${{ secrets.SSH_HOST }}"
+          echo "USER=${{ secrets.SSH_USER }}"
+          echo "PORT=${{ secrets.SSH_PORT }}"
+
+      - name: Write SSH key from base64
         run: |
           echo "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 -d > ./deploy_key
           chmod 600 ./deploy_key
+          ls -la ./deploy_key
+          ssh-keygen -lf ./deploy_key
 
-      - name: Deploy to server via SSH
+      - name: Network check to SSH
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y netcat-openbsd
+          nc -vz -w 5 ${{ secrets.SSH_HOST }} ${{ secrets.SSH_PORT }}
+
+      - name: SSH test (native ssh)
+        run: |
+          ssh -vvv -o StrictHostKeyChecking=no \
+              -p ${{ secrets.SSH_PORT }} \
+              -i ./deploy_key \
+              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo OK_FROM_GITHUB && whoami && hostname"
+
+      - name: Deploy to server via SSH (appleboy)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -22,5 +43,6 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           key_path: ./deploy_key
           request_pty: true
+          debug: true
           script: |
             /opt/ai-agent-docker/deploy.sh

@@ -8,8 +8,10 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
 
+
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from agent.modules.fiaetutor import analyze_problem
 from agent.modules.fiae_analysis import generate_weakness_report
@@ -18,22 +20,22 @@ from agent.modules.career import suggest_path
 from agent.memory.memory import init_db, get_recent_fiae_logs
 
 
-ALLOWED_ORIGINS = [
-    "https://barakzai.cloud",
-    "https://www.barakzai.cloud",
 
-    # برای تست لوکال DailyFlow
+
+
+app = FastAPI(title="Barakzai Personal Agent API", version="0.1.0")
+
+cors_env = os.getenv("CORS_ORIGINS", "")
+origins = [o.strip() for o in cors_env.split(",") if o.strip()] or [
     "http://localhost:5173",
-    "http://localhost:8080",
-
-    # اگر گاهی با 127.0.0.1 باز می‌کنی
     "http://127.0.0.1:5173",
+    "http://localhost:8080",
     "http://127.0.0.1:8080",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

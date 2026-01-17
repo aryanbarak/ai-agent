@@ -1,10 +1,26 @@
-- name: Deploy to server via SSH
-  uses: appleboy/ssh-action@v1.0.3
-  with:
-    host: ${{ secrets.SSH_HOST }}
-    username: ${{ secrets.SSH_USER }}
-    port: ${{ secrets.SSH_PORT }}
-    key: ${{ secrets.SSH_PRIVATE_KEY }}
-    request_pty: true
-    script: |
-      /opt/ai-agent-docker/deploy.sh
+name: Deploy AI Agent
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write SSH key
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 -d > ./deploy_key
+          chmod 600 ./deploy_key
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          port: ${{ secrets.SSH_PORT }}
+          key_path: ./deploy_key
+          request_pty: true
+          script: |
+            /opt/ai-agent-docker/deploy.sh

@@ -15,11 +15,12 @@ jobs:
           echo "USER=${{ secrets.SSH_USER }}"
           echo "PORT=${{ secrets.SSH_PORT }}"
 
-      - name: Write SSH key from base64
+      - name: Write SSH key
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY_B64 }}" | base64 -d > ./deploy_key
+          cat > ./deploy_key <<'KEY'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          KEY
           chmod 600 ./deploy_key
-          ls -la ./deploy_key
           ssh-keygen -lf ./deploy_key
 
       - name: Network check to SSH
@@ -30,10 +31,10 @@ jobs:
 
       - name: SSH test (native ssh)
         run: |
-          ssh -vvv -o StrictHostKeyChecking=no \
+          ssh -o StrictHostKeyChecking=no \
               -p ${{ secrets.SSH_PORT }} \
               -i ./deploy_key \
-              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo OK_FROM_GITHUB && whoami && hostname"
+              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "echo OK_FROM_GITHUB"
 
       - name: Deploy to server via SSH (appleboy)
         uses: appleboy/ssh-action@v1.0.3

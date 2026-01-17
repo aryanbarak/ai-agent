@@ -227,10 +227,12 @@ def _contains_latin(text: str) -> bool:
 def _language_ok(data: dict[str, object], lang: str) -> bool:
     text = _collect_text(data)
     if lang == "fa":
-        return _contains_persian(text) and not _contains_latin(text)
+        # Persian answers may include Latin terms like "Bubble Sort", "O(n^2)" etc.
+        return _contains_persian(text)
     if lang in ("de", "en"):
         return not _contains_persian(text)
     return True
+
 
 
 def _build_system_prompt(lang: str, strong: bool = False) -> str:

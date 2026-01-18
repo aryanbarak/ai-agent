@@ -1,0 +1,26 @@
+name: Deploy AI Agent
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write SSH key
+        run: |
+          cat > ./deploy_key <<'KEY'
+          ${{ secrets.SSH_PRIVATE_KEY }}
+          KEY
+          chmod 600 ./deploy_key
+          ssh-keygen -lf ./deploy_key
+
+      - name: Deploy
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+              -p ${{ secrets.SSH_PORT }} \
+              -i ./deploy_key \
+              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+              "bash /opt/ai-agent-docker/deploy.sh"

@@ -1,0 +1,22 @@
+# Production Dependencies (نسخه بهبود یافته)
+
+# Web Framework
+fastapi==0.115.8
+uvicorn[standard]==0.30.6
+
+# Data Validation & Settings
+pydantic==2.10.6
+pydantic-settings==2.7.0
+
+# LLM Provider
+openai==1.61.1
+
+# Async Database
+aiosqlite==0.20.0
+
+# Development Dependencies (اختیاری برای development)
+# pytest==8.3.4
+# pytest-asyncio==0.24.0
+# black==24.10.0
+# mypy==1.13.0
+# ruff==0.8.4

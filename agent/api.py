@@ -255,6 +255,10 @@ def _format_analysis_answer(result: object, lang: str, topic: str) -> str:
 
 
 # ---------- Routes ----------
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 
 @app.get("/")
 def root():

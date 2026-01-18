@@ -3,8 +3,10 @@
 from typing import List, Literal
 
 import re
+import uuid
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -43,7 +45,34 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],  # Allow frontend to read this header
 )
+
+
+# Request ID middleware for tracking
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    # Get or generate request ID
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    
+    # Store in request state for access in endpoints
+    request.state.request_id = request_id
+    
+    # Log request start
+    start_time = time.time()
+    print(f"[{request_id}] {request.method} {request.url.path} - START")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Log request completion
+    duration = time.time() - start_time
+    print(f"[{request_id}] {request.method} {request.url.path} - COMPLETED in {duration:.3f}s (status={response.status_code})")
+    
+    # Add request ID to response headers
+    response.headers["X-Request-ID"] = request_id
+    
+    return response
 
 
 
@@ -74,6 +103,7 @@ class AnalyzeMeta(BaseModel):
     model: str
     cached: bool
     retry_after_seconds: int | None
+    request_id: str | None = None  # Track request across frontend-backend
 
 
 class AnalyzeResult(BaseModel):
@@ -266,8 +296,17 @@ def root():
 
 
 @app.post("/analyze", response_model=AnalyzeResult)
-def analyze(req: AnalyzeRequest):
+def analyze(req: AnalyzeRequest, request: Request):
+    # Get request ID from middleware
+    request_id = getattr(request.state, "request_id", None)
+    
+    # Call AI service
     result = analyze_problem(req.message, language=req.language, mode=req.mode)
+    
+    # Add request_id to meta
+    if "meta" in result and isinstance(result["meta"], dict):
+        result["meta"]["request_id"] = request_id
+    
     return AnalyzeResult(**result)
 
 

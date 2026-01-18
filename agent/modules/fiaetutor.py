@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from openai import AsyncOpenAI
+from agent.utils.logger import fiae_logger, cache_logger
 
 # Client for Gemini via OpenAI-compatible endpoint
 # API key is read from environment variable GEMINI_API_KEY
@@ -37,15 +38,28 @@ class AsyncCache:
                 value, timestamp = self._cache[key]
                 # Check if expired
                 if time.time() - timestamp < self._ttl:
+                    cache_logger.debug(
+                        "Cache HIT",
+                        extra={"extra": {"key_hash": hash(key), "age_seconds": int(time.time() - timestamp)}}
+                    )
                     return copy.deepcopy(value)
                 else:
                     # Remove expired entry
+                    cache_logger.debug(
+                        "Cache entry expired",
+                        extra={"extra": {"key_hash": hash(key), "age_seconds": int(time.time() - timestamp)}}
+                    )
                     del self._cache[key]
+            cache_logger.debug("Cache MISS", extra={"extra": {"key_hash": hash(key)}})
             return None
     
     async def set(self, key: tuple[str, str, str], value: dict[str, object]) -> None:
         async with self._lock:
             self._cache[key] = (copy.deepcopy(value), time.time())
+            cache_logger.debug(
+                "Cache SET",
+                extra={"extra": {"key_hash": hash(key), "cache_size": len(self._cache)}}
+            )
     
     async def clear_expired(self) -> int:
         """Remove all expired entries and return count of removed items"""
@@ -57,6 +71,13 @@ class AsyncCache:
             ]
             for key in expired_keys:
                 del self._cache[key]
+            
+            if expired_keys:
+                cache_logger.info(
+                    f"Cleared {len(expired_keys)} expired cache entries",
+                    extra={"extra": {"expired_count": len(expired_keys), "remaining": len(self._cache)}}
+                )
+            
             return len(expired_keys)
 
 _CACHE = AsyncCache(ttl_seconds=3600)  # 1 hour TTL
@@ -349,6 +370,11 @@ async def analyze_problem(
     normalized_lang = _normalize_lang(language or lang or "de")
     normalized_mode = mode or "unknown"
 
+    fiae_logger.debug(
+        "Analyzing problem",
+        extra={"extra": {"language": normalized_lang, "mode": normalized_mode, "text_length": len(text)}}
+    )
+
     if not text:
         meta = _build_meta(
             language=normalized_lang,
@@ -360,6 +386,7 @@ async def analyze_problem(
     cache_key = (text, normalized_lang, normalized_mode)
     cached_result = await _CACHE.get(cache_key)
     if cached_result is not None:
+        fiae_logger.info("Returning cached result")
         cached_meta = _build_meta(
             language=normalized_lang,
             mode=normalized_mode,
@@ -421,8 +448,14 @@ async def analyze_problem(
         return result
     except Exception as e:
         message = str(e)
+        fiae_logger.error(
+            f"Error analyzing problem: {message}",
+            extra={"extra": {"language": normalized_lang, "mode": normalized_mode}},
+            exc_info=True
+        )
         retry_after_seconds = _extract_retry_after_seconds(message)
         if _looks_like_quota_error(message):
+            fiae_logger.warning("Quota error detected", extra={"extra": {"retry_after": retry_after_seconds}})
             meta = _build_meta(
                 language=normalized_lang,
                 mode=normalized_mode,

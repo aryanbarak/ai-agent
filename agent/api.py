@@ -20,6 +20,7 @@ from agent.modules.fiae_analysis import generate_weakness_report
 from agent.modules.planner import Task, Importance, Urgency, prioritize
 from agent.modules.career import suggest_path
 from agent.memory.memory import init_db, get_recent_fiae_logs
+from agent.utils.logger import api_logger
 
 
 
@@ -60,14 +61,35 @@ async def add_request_id(request: Request, call_next):
     
     # Log request start
     start_time = time.time()
-    print(f"[{request_id}] {request.method} {request.url.path} - START")
+    api_logger.info(
+        f"{request.method} {request.url.path} - START",
+        extra={
+            "request_id": request_id,
+            "extra": {
+                "method": request.method,
+                "path": str(request.url.path),
+                "client": request.client.host if request.client else None,
+            }
+        }
+    )
     
     # Process request
     response = await call_next(request)
     
     # Log request completion
     duration = time.time() - start_time
-    print(f"[{request_id}] {request.method} {request.url.path} - COMPLETED in {duration:.3f}s (status={response.status_code})")
+    api_logger.info(
+        f"{request.method} {request.url.path} - COMPLETED",
+        extra={
+            "request_id": request_id,
+            "extra": {
+                "method": request.method,
+                "path": str(request.url.path),
+                "duration_seconds": round(duration, 3),
+                "status_code": response.status_code,
+            }
+        }
+    )
     
     # Add request ID to response headers
     response.headers["X-Request-ID"] = request_id

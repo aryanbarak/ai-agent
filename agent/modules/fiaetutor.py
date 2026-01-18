@@ -1,7 +1,9 @@
+import asyncio
 import copy
 import json
 import os
 import re
+import time
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -21,7 +23,43 @@ client = AsyncOpenAI(
 )
 
 MODEL_NAME = "gemini-2.5-flash"
-_CACHE: dict[tuple[str, str, str], dict[str, object]] = {}
+
+# Thread-safe async cache with TTL
+class AsyncCache:
+    def __init__(self, ttl_seconds: int = 3600):
+        self._cache: dict[tuple[str, str, str], tuple[dict[str, object], float]] = {}
+        self._lock = asyncio.Lock()
+        self._ttl = ttl_seconds
+    
+    async def get(self, key: tuple[str, str, str]) -> dict[str, object] | None:
+        async with self._lock:
+            if key in self._cache:
+                value, timestamp = self._cache[key]
+                # Check if expired
+                if time.time() - timestamp < self._ttl:
+                    return copy.deepcopy(value)
+                else:
+                    # Remove expired entry
+                    del self._cache[key]
+            return None
+    
+    async def set(self, key: tuple[str, str, str], value: dict[str, object]) -> None:
+        async with self._lock:
+            self._cache[key] = (copy.deepcopy(value), time.time())
+    
+    async def clear_expired(self) -> int:
+        """Remove all expired entries and return count of removed items"""
+        async with self._lock:
+            current_time = time.time()
+            expired_keys = [
+                k for k, (_, timestamp) in self._cache.items()
+                if current_time - timestamp >= self._ttl
+            ]
+            for key in expired_keys:
+                del self._cache[key]
+            return len(expired_keys)
+
+_CACHE = AsyncCache(ttl_seconds=3600)  # 1 hour TTL
 
 
 def _normalize_lang(lang: str) -> str:
@@ -320,8 +358,8 @@ async def analyze_problem(
         return _empty_result(_empty_summary(normalized_lang), meta)
 
     cache_key = (text, normalized_lang, normalized_mode)
-    if cache_key in _CACHE:
-        cached_result = copy.deepcopy(_CACHE[cache_key])
+    cached_result = await _CACHE.get(cache_key)
+    if cached_result is not None:
         cached_meta = _build_meta(
             language=normalized_lang,
             mode=normalized_mode,
@@ -368,7 +406,7 @@ async def analyze_problem(
                     base_meta,
                 )
                 if _language_ok(retry_result, normalized_lang):
-                    _CACHE[cache_key] = copy.deepcopy(retry_result)
+                    await _CACHE.set(cache_key, retry_result)
                     return retry_result
 
             error_meta = _build_meta(
@@ -379,7 +417,7 @@ async def analyze_problem(
             )
             return _empty_result(_language_mismatch_summary(normalized_lang), error_meta)
 
-        _CACHE[cache_key] = copy.deepcopy(result)
+        await _CACHE.set(cache_key, result)
         return result
     except Exception as e:
         message = str(e)

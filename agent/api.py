@@ -294,6 +294,23 @@ def health():
 def root():
     return {"status": "ok", "message": "API is running"}
 
+@app.get("/cache/stats")
+async def cache_stats():
+    """Get cache statistics including size and clear expired entries"""
+    from agent.modules.fiaetutor import _CACHE
+    
+    # Clear expired entries first
+    expired_count = await _CACHE.clear_expired()
+    
+    # Get current cache size
+    async with _CACHE._lock:
+        current_size = len(_CACHE._cache)
+    
+    return {
+        "cache_size": current_size,
+        "expired_cleared": expired_count,
+        "ttl_seconds": _CACHE._ttl,
+    }
 
 @app.post("/analyze", response_model=AnalyzeResult)
 async def analyze(req: AnalyzeRequest, request: Request):

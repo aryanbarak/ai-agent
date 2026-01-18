@@ -4,7 +4,7 @@ import os
 import re
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 # Client for Gemini via OpenAI-compatible endpoint
 # API key is read from environment variable GEMINI_API_KEY
@@ -15,7 +15,7 @@ if not GEMINI_API_KEY:
         "GEMINI_API_KEY is not set. Please set it as an environment variable."
     )
 
-client = OpenAI(
+client = AsyncOpenAI(
     api_key=GEMINI_API_KEY,
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
 )
@@ -291,8 +291,8 @@ Guidelines:
 """
 
 
-def _call_model(messages: list[dict[str, str]]) -> str:
-    completion = client.chat.completions.create(
+async def _call_model(messages: list[dict[str, str]]) -> str:
+    completion = await client.chat.completions.create(
         model=MODEL_NAME,
         temperature=0.2,
         messages=messages,
@@ -300,7 +300,7 @@ def _call_model(messages: list[dict[str, str]]) -> str:
     return completion.choices[0].message.content or ""
 
 
-def analyze_problem(
+async def analyze_problem(
     problem_text: str,
     lang: str | None = None,
     *,
@@ -333,7 +333,7 @@ def analyze_problem(
     system_prompt = _build_system_prompt(normalized_lang)
 
     try:
-        content = _call_model(
+        content = await _call_model(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},
@@ -354,7 +354,7 @@ def analyze_problem(
 
         if not _language_ok(result, normalized_lang):
             strong_prompt = _build_system_prompt(normalized_lang, strong=True)
-            retry_content = _call_model(
+            retry_content = await _call_model(
                 [
                     {"role": "system", "content": strong_prompt},
                     {"role": "user", "content": text},

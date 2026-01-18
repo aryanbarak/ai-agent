@@ -296,12 +296,12 @@ def root():
 
 
 @app.post("/analyze", response_model=AnalyzeResult)
-def analyze(req: AnalyzeRequest, request: Request):
+async def analyze(req: AnalyzeRequest, request: Request):
     # Get request ID from middleware
     request_id = getattr(request.state, "request_id", None)
     
-    # Call AI service
-    result = analyze_problem(req.message, language=req.language, mode=req.mode)
+    # Call AI service (now async)
+    result = await analyze_problem(req.message, language=req.language, mode=req.mode)
     
     # Add request_id to meta
     if "meta" in result and isinstance(result["meta"], dict):

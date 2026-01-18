@@ -1,15 +1,22 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "Run Agent",
-      "type": "shell",
-      "command": "python agent/main.py",
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": []
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Agent",
+			"type": "shell",
+			"command": "python agent/main.py",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Run Backend API",
+			"type": "shell",
+			"command": "& .\\venv\\Scripts\\Activate.ps1; $env:GEMINI_API_KEY='AIzaSyAYMr6ciR6KDcNGyS734toKkNBiqB6OSeE'; uvicorn agent.api:app --reload --port 8000",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
 }

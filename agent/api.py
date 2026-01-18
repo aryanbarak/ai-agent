@@ -316,6 +316,19 @@ def health():
 def root():
     return {"status": "ok", "message": "API is running"}
 
+@app.get("/api/status")
+def api_status():
+    """Check API key and service status"""
+    import os
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    
+    return {
+        "status": "ok" if gemini_key else "missing_api_key",
+        "api_key_configured": bool(gemini_key),
+        "api_key_preview": f"{gemini_key[:10]}...{gemini_key[-4:]}" if gemini_key else None,
+        "message": "API is ready" if gemini_key else "GEMINI_API_KEY environment variable is not set"
+    }
+
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache statistics including size and clear expired entries"""

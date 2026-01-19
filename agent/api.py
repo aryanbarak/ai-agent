@@ -38,10 +38,7 @@ origins = [o.strip() for o in cors_env.split(",") if o.strip()] or [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",
-        "http://localhost:5173",
-    ],
+    allow_origins=origins,  # Use the origins from CORS_ORIGINS env var
     allow_origin_regex=r"^https://(.*\.)?barakzai\.cloud$",
     allow_credentials=True,
     allow_methods=["*"],

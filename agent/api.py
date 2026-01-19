@@ -347,6 +347,23 @@ async def cache_stats():
         "ttl_seconds": _CACHE._ttl,
     }
 
+@app.post("/cache/clear")
+async def clear_cache():
+    """Clear all cache entries"""
+    from agent.modules.fiaetutor import _CACHE
+    
+    async with _CACHE._lock:
+        old_size = len(_CACHE._cache)
+        _CACHE._cache.clear()
+    
+    api_logger.info(f"Cache cleared: {old_size} entries removed")
+    
+    return {
+        "status": "ok",
+        "cleared_entries": old_size,
+        "message": f"Successfully cleared {old_size} cache entries"
+    }
+
 @app.post("/analyze", response_model=AnalyzeResult)
 async def analyze(req: AnalyzeRequest, request: Request):
     # Get request ID from middleware

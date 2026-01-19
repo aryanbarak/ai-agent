@@ -286,12 +286,16 @@ def _contains_latin(text: str) -> bool:
 def _language_ok(data: dict[str, object], lang: str) -> bool:
     text = _collect_text(data)
     if lang == "fa":
-        # Persian answers may include Latin terms like "Bubble Sort", "O(n^2)" etc.
-        # Relaxed validation: accept any response that has some Persian content
-        # or is a valid technical response (even if mostly Latin)
-        has_persian = _contains_persian(text)
+        # For Persian: check if summary and steps contain Persian text
+        # Code/pseudocode can be in English/German
+        summary = str(data.get("summary", ""))
+        steps_text = " ".join(str(s) for s in data.get("steps", []))
+        explanation_text = summary + " " + steps_text
+        
+        # Persian answers should have Persian in explanations
+        has_persian = _contains_persian(explanation_text)
+        # Be lenient: accept if any Persian content OR substantial content
         has_content = len(text.strip()) > 10
-        # Accept if it has Persian OR if it's substantial content (technical terms)
         return has_persian or has_content
     if lang in ("de", "en"):
         # For German/English, just ensure no Persian characters
@@ -309,14 +313,32 @@ def _build_system_prompt(lang: str, strong: bool = False) -> str:
     }
     lang_name = lang_map.get(lang, lang)
     
+    # For Persian, explanations in Persian but code in English/German
+    code_lang = "English or German" if lang == "fa" else lang_name
+    
     extra_rule = ""
     if strong:
-        extra_rule = (
-            f"- The response MUST be in {lang_name} ONLY.\n"
-            "- Do NOT mix languages or use any other language.\n"
-            "- For Persian responses, use Persian script (فارسی) for all text.\n"
-            "- Output JSON ONLY with the exact schema.\n"
-        )
+        if lang == "fa":
+            extra_rule = (
+                f"- Explanations (summary, steps, example, visual) MUST be in {lang_name} using Persian script (فارسی).\n"
+                f"- Code and pseudocode MUST be in {code_lang} (technical terms, keywords, comments).\n"
+                "- Do NOT write explanations in German or English.\n"
+                "- Use Persian words for explanations, not Latin alphabet.\n"
+                "- Output JSON ONLY with the exact schema.\n"
+            )
+        else:
+            extra_rule = (
+                f"- The response MUST be in {lang_name} ONLY.\n"
+                "- Do NOT mix languages or use any other language.\n"
+                "- Output JSON ONLY with the exact schema.\n"
+            )
+    else:
+        # Even in non-strong mode, be clear about language separation for Persian
+        if lang == "fa":
+            extra_rule = (
+                f"- Write explanations (summary, steps, example, visual) in {lang_name} (فارسی).\n"
+                f"- Write code and pseudocode in {code_lang}.\n"
+            )
     
     return f"""
 You are a strict but helpful FIAE (Fachinformatiker Anwendungsentwicklung) exam coach.
@@ -330,7 +352,8 @@ Rules:
 - Be concise; avoid long intros.
 - Do NOT just give the final answer.
 - Output JSON ONLY (no markdown, no code fences, no extra text).
-- All strings must be in {lang_name}.
+- Explanations (summary, steps, example, visual) must be in {lang_name}.
+- Code and pseudocode must be in {code_lang}.
 {extra_rule}
 
 Output format:
@@ -355,7 +378,12 @@ Guidelines:
 - summary: 1-3 short sentences (short restatement + core idea) in {lang_name}.
 - steps: ordered steps as short sentences in {lang_name}.
 - example: short example if useful (in {lang_name}), otherwise null.
-- pseudocode: short pseudocode if useful (in {lang_name}), otherwise null.
+- pseudocode: short pseudocode if useful (in {code_lang}), otherwise null.
+- visual: ASCII diagram or short description if useful (in {lang_name}), otherwise null.
+"""
+- steps: ordered steps as short sentences in {lang_name}.
+- example: short example if useful (in {lang_name}), otherwise null.
+- pseudocode: short pseudocode if useful (in {code_lang}), otherwise null.
 - visual: ASCII diagram or short description if useful (in {lang_name}), otherwise null.
 """
 

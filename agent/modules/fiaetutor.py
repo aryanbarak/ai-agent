@@ -381,11 +381,6 @@ Guidelines:
 - pseudocode: short pseudocode if useful (in {code_lang}), otherwise null.
 - visual: ASCII diagram or short description if useful (in {lang_name}), otherwise null.
 """
-- steps: ordered steps as short sentences in {lang_name}.
-- example: short example if useful (in {lang_name}), otherwise null.
-- pseudocode: short pseudocode if useful (in {code_lang}), otherwise null.
-- visual: ASCII diagram or short description if useful (in {lang_name}), otherwise null.
-"""
 
 
 async def _call_model(messages: list[dict[str, str]]) -> str:

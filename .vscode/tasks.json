@@ -17,6 +17,13 @@
 			"command": "& .\\venv\\Scripts\\Activate.ps1; $env:GEMINI_API_KEY='AIzaSyAYMr6ciR6KDcNGyS734toKkNBiqB6OSeE'; uvicorn agent.api:app --reload --port 8000",
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Start Backend Server",
+			"type": "shell",
+			"command": "& .\\venv\\Scripts\\Activate.ps1; $env:GEMINI_API_KEY=(Get-Content .env | Select-String 'GEMINI_API_KEY' | ForEach-Object { $_ -replace 'GEMINI_API_KEY=', '' }); if (-not $env:GEMINI_API_KEY) { Write-Host 'WARNING: GEMINI_API_KEY not found in .env file' -ForegroundColor Yellow }; uvicorn agent.api:app --reload --port 8000 --host 0.0.0.0",
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

@@ -301,13 +301,23 @@ def _language_ok(data: dict[str, object], lang: str) -> bool:
 
 
 def _build_system_prompt(lang: str, strong: bool = False) -> str:
+    # Map language codes to full names for better model understanding
+    lang_map = {
+        "de": "German (Deutsch)",
+        "en": "English",
+        "fa": "Persian (Farsi/فارسی)"
+    }
+    lang_name = lang_map.get(lang, lang)
+    
     extra_rule = ""
     if strong:
         extra_rule = (
-            f"- The response must be in {lang} ONLY.\n"
-            "- Do NOT include any other language.\n"
+            f"- The response MUST be in {lang_name} ONLY.\n"
+            "- Do NOT mix languages or use any other language.\n"
+            "- For Persian responses, use Persian script (فارسی) for all text.\n"
             "- Output JSON ONLY with the exact schema.\n"
         )
+    
     return f"""
 You are a strict but helpful FIAE (Fachinformatiker Anwendungsentwicklung) exam coach.
 Focus ONLY on:
@@ -320,7 +330,7 @@ Rules:
 - Be concise; avoid long intros.
 - Do NOT just give the final answer.
 - Output JSON ONLY (no markdown, no code fences, no extra text).
-- All strings must be in {lang}.
+- All strings must be in {lang_name}.
 {extra_rule}
 
 Output format:
@@ -342,11 +352,11 @@ Return ONLY valid JSON with this exact schema:
 }}
 
 Guidelines:
-- summary: 1-3 short sentences (short restatement + core idea).
-- steps: ordered steps as short sentences.
-- example: short example if useful, otherwise null.
-- pseudocode: short pseudocode if useful, otherwise null.
-- visual: ASCII diagram or short description if useful, otherwise null.
+- summary: 1-3 short sentences (short restatement + core idea) in {lang_name}.
+- steps: ordered steps as short sentences in {lang_name}.
+- example: short example if useful (in {lang_name}), otherwise null.
+- pseudocode: short pseudocode if useful (in {lang_name}), otherwise null.
+- visual: ASCII diagram or short description if useful (in {lang_name}), otherwise null.
 """
 
 
